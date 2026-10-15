@@ -52,8 +52,17 @@ export const VendorMovementsReport: React.FC = () => {
     let rollingBalance = currentBalance;
 
     return relevantWithdrawals.map((w: any) => {
+      let canonicalUbtr = '';
+      if (w.ubtr_reference && /^UBTR-/i.test(w.ubtr_reference)) {
+        canonicalUbtr = w.ubtr_reference.toUpperCase();
+      } else if (w.admin_notes || w.admin_statement) {
+        const m = (w.admin_notes || w.admin_statement).match(/\b(UBTR-\d+)\b/i);
+        if (m) canonicalUbtr = m[1].toUpperCase();
+      }
       const opNum = resolveOperationNumber(w);
-      const canonicalUbtr = w.ubtr_reference || opNum;
+      if (!canonicalUbtr) {
+        canonicalUbtr = opNum;
+      }
       const isApproved = w.status === 'approved' || w.status === 'completed';
       const isPending = w.status === 'pending';
 

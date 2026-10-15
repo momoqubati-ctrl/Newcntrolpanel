@@ -275,5 +275,21 @@ assert(emptySummary.totalDebit === 0, 'Empty Safety: totalDebit is 0');
 assert(emptySummary.totalCredit === 0, 'Empty Safety: totalCredit is 0');
 assert(emptySummary.closingBalance === 0, 'Empty Safety: closingBalance is 0');
 
+// Test 12: Canonical Sequential UBTR Parity with Operations Report
+const txWithDescriptionUbtr: RawTransactionInput[] = [
+  {
+    id: 'tx-card-sale-001',
+    amount: 95.00,
+    type: 'commission',
+    status: 'completed',
+    reference_id: '7b950252-e86e-4dd8-92d3-8d695f24b533',
+    description: 'مبيعات كروت واي فاي (UBTR-10000000000103)',
+    created_at: '2026-10-15T12:10:00Z',
+  },
+];
+const statementWithUbtr = buildStatementItems(txWithDescriptionUbtr);
+assert(statementWithUbtr[0].ubtr === 'UBTR-10000000000103', 'UBTR Extraction: Resolves authentic UBTR-10000000000103 from description');
+assert(statementWithUbtr[0].ref_no === 'TX-7B950252', 'UBTR Extraction: Financial reference remains TX-7B950252');
+
 console.log('--- All Vendor Account Statement Unit Tests PASSED Successfully! ---');
 

@@ -14,7 +14,16 @@ import {
 } from '../../lib/vendorStatementUtils';
 
 export const VendorAccountStatement: React.FC = () => {
-  const { currentUser, currentVendor, withdrawalRequests, wallets, getAuthenticatedSupabase } = useAuth();
+  const { 
+    currentUser, 
+    currentVendor, 
+    withdrawalRequests, 
+    wallets, 
+    cards = [], 
+    payments = [], 
+    deliveryAttempts = [], 
+    getAuthenticatedSupabase 
+  } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'credit' | 'debit'>('all');
   const [startDate, setStartDate] = useState('');
@@ -76,9 +85,14 @@ export const VendorAccountStatement: React.FC = () => {
 
   // 1. Build chronological statement entries and calculate cumulative running balance
   const fullLedger: StatementRow[] = useMemo(() => {
-    const rawItems = buildStatementItems(transactions, vendorWithdrawals);
+    const rawItems = buildStatementItems(transactions, vendorWithdrawals, {
+      cards,
+      payments,
+      deliveryAttempts,
+      withdrawalRequests: vendorWithdrawals,
+    });
     return calculateRunningBalances(rawItems);
-  }, [transactions, vendorWithdrawals]);
+  }, [transactions, vendorWithdrawals, cards, payments, deliveryAttempts]);
 
   // 2. Filter entries and calculate accounting summary (Opening, Debit, Credit, Net, Closing)
   const { filtered: filteredLedger, summary } = useMemo(() => {

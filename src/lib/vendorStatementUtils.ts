@@ -84,12 +84,20 @@ export function normalizeTransactionStatus(status: unknown): 'completed' | 'pend
   return 'completed';
 }
 
+export interface StatementContext {
+  cards?: any[];
+  payments?: any[];
+  deliveryAttempts?: any[];
+  withdrawalRequests?: any[];
+}
+
 /**
  * Builds chronological statement items from authentic transactions and deduplicated withdrawal requests.
  */
 export function buildStatementItems(
   transactions: RawTransactionInput[] = [],
-  withdrawalRequests: RawWithdrawalRequestInput[] = []
+  withdrawalRequests: RawWithdrawalRequestInput[] = [],
+  context?: StatementContext
 ): StatementItem[] {
   const items: StatementItem[] = [];
   const processedWithdrawalIds = new Set<string>();
@@ -109,11 +117,94 @@ export function buildStatementItems(
       processedWithdrawalIds.add(String(tx.reference_id).toLowerCase());
     }
 
-    // Format UBTR canonical identifier
-    const canonicalUbtr = tx.ubtr_reference ||
-      (tx.transaction_reference?.startsWith('UBTR-') ? tx.transaction_reference : '') ||
-      (tx.reference_id?.startsWith('UBTR-') ? tx.reference_id : '') ||
-      (tx.reference_id ? formatMasterTransactionId(tx.reference_id) : formatMasterTransactionId(tx.id));
+    // Resolve canonical sequential UBTR (e.g. UBTR-10000000000103)
+    let canonicalUbtr = '';
+
+    // Tier 1: Check explicit fields if they contain canonical UBTR
+    if (tx.ubtr_reference && /^UBTR-/i.test(tx.ubtr_reference)) {
+      canonicalUbtr = tx.ubtr_reference.trim().toUpperCase();
+    } else if (tx.transaction_reference && /^UBTR-/i.test(tx.transaction_reference)) {
+      canonicalUbtr = tx.transaction_reference.trim().toUpperCase();
+    } else if (tx.reference_id && /^UBTR-/i.test(tx.reference_id)) {
+      canonicalUbtr = tx.reference_id.trim().toUpperCase();
+    }
+
+    // Tier 2: Extract authentic sequential UBTR embedded in description (e.g. "(UBTR-10000000000103)")
+    if (!canonicalUbtr && tx.description) {
+      const match = tx.description.match(/\b(UBTR-\d+)\b/i);
+      if (match) {
+        canonicalUbtr = match[1].toUpperCase();
+      }
+    }
+
+    // Tier 3: Resolve from linked context records (cards, deliveryAttempts, payments, withdrawals)
+    if (!canonicalUbtr && context) {
+      const refId = tx.reference_id ? String(tx.reference_id).toLowerCase() : '';
+      const txId = tx.id ? String(tx.id).toLowerCase() : '';
+
+      // Check cards
+      if (context.cards && context.cards.length > 0) {
+        const matchedCard = context.cards.find((c: any) => {
+          if (!c) return false;
+          const cardId = String(c.id).toLowerCase();
+          const orderId = c.order_id ? String(c.order_id).toLowerCase() : '';
+          const resId = c.reserved_for_payment_id ? String(c.reserved_for_payment_id).toLowerCase() : '';
+          return (refId && (orderId === refId || cardId === refId || resId === refId)) ||
+                 (tx.description && tx.description.includes(c.id));
+        });
+
+        if (matchedCard) {
+          const cardUbtr = matchedCard.ubtr_reference || matchedCard.ubtr || matchedCard.ubtr_id;
+          if (cardUbtr && /^UBTR-/i.test(cardUbtr)) {
+            canonicalUbtr = cardUbtr.toUpperCase();
+          }
+        }
+      }
+
+      // Check delivery attempts
+      if (!canonicalUbtr && context.deliveryAttempts && context.deliveryAttempts.length > 0) {
+        const matchedDelivery = context.deliveryAttempts.find((d: any) => {
+          if (!d) return false;
+          const dOrderId = d.order_id ? String(d.order_id).toLowerCase() : '';
+          const dPaymentId = d.payment_id ? String(d.payment_id).toLowerCase() : '';
+          return refId && (dOrderId === refId || dPaymentId === refId);
+        });
+
+        if (matchedDelivery?.ubtr_id && /^UBTR-/i.test(matchedDelivery.ubtr_id)) {
+          canonicalUbtr = matchedDelivery.ubtr_id.toUpperCase();
+        }
+      }
+
+      // Check payments
+      if (!canonicalUbtr && context.payments && context.payments.length > 0) {
+        const matchedPayment = context.payments.find((p: any) => {
+          if (!p) return false;
+          return refId && String(p.id).toLowerCase() === refId;
+        });
+
+        if (matchedPayment?.ubtr_reference && /^UBTR-/i.test(matchedPayment.ubtr_reference)) {
+          canonicalUbtr = matchedPayment.ubtr_reference.toUpperCase();
+        }
+      }
+
+      // Check withdrawal requests
+      if (!canonicalUbtr && context.withdrawalRequests && context.withdrawalRequests.length > 0) {
+        const matchedWr = context.withdrawalRequests.find((w: any) => {
+          if (!w) return false;
+          const wId = String(w.id).toLowerCase();
+          return (refId && wId === refId) || (txId && wId === txId);
+        });
+
+        if (matchedWr?.ubtr_reference && /^UBTR-/i.test(matchedWr.ubtr_reference)) {
+          canonicalUbtr = matchedWr.ubtr_reference.toUpperCase();
+        }
+      }
+    }
+
+    // Tier 4: Fallback to unified financial reference (TX-XXXXXXXX) if no sequential UBTR exists
+    if (!canonicalUbtr) {
+      canonicalUbtr = tx.reference_id ? formatMasterTransactionId(tx.reference_id) : formatMasterTransactionId(tx.id);
+    }
 
     // Format reference number
     let refNo = tx.transaction_reference || '';
@@ -171,7 +262,16 @@ export function buildStatementItems(
       ? `طلب سحب مرفوض: ${wr.bank_name || 'محفظة بنكية'} (${wr.reject_reason || 'غير محدد'})`
       : `طلب سحب قيد المراجعة: ${wr.bank_name || 'محفظة بنكية'} (${wr.account_number || ''})`;
 
-    const wrUbtr = wr.ubtr_reference || formatMasterTransactionId(wr.id);
+    let wrUbtr = '';
+    if (wr.ubtr_reference && /^UBTR-/i.test(wr.ubtr_reference)) {
+      wrUbtr = wr.ubtr_reference.trim().toUpperCase();
+    } else if (wr.reject_reason) {
+      const match = wr.reject_reason.match(/\b(UBTR-\d+)\b/i);
+      if (match) wrUbtr = match[1].toUpperCase();
+    }
+    if (!wrUbtr) {
+      wrUbtr = formatMasterTransactionId(wr.id);
+    }
 
     items.push({
       id: `wr-${wr.id}`,

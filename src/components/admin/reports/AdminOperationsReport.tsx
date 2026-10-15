@@ -122,13 +122,20 @@ export const AdminOperationsReport: React.FC = () => {
 
       const gross = Number(p.total_amount || p.amount || 100);
       const commRate = vendor?.commission_rate ?? 5.0;
-      const comm = Math.round(gross * (commRate / 100));
+      const comm = Number((gross * (commRate / 100)).toFixed(2));
 
-      const basConfig = walletsConfig.find(w => w.provider === (p.provider || 'basgate'));
-      const feePercent = basConfig?.fee_percentage !== undefined ? basConfig.fee_percentage : (p.provider === 'basgate' ? 1.5 : 0);
-      const fixedFee = basConfig?.fixed_fee ?? 0;
-      const isGateway = p.provider === 'basgate' || !p.provider;
-      const gwFee = isGateway ? Math.round((gross * (feePercent / 100)) + fixedFee) : 0;
+      // Strictly resolve gateway fee from Admin Gateway Configuration (walletsConfig)
+      const providerLower = String(p.provider || '').toLowerCase().trim();
+      const gwConfig = walletsConfig.find(w => 
+        (providerLower && (w.provider?.toLowerCase() === providerLower || w.id === p.provider)) ||
+        (!providerLower && w.provider === 'basgate') ||
+        (providerLower === 'basgate' && w.provider === 'basgate')
+      );
+      const feePercent = gwConfig?.fee_percentage !== undefined ? Number(gwConfig.fee_percentage) : 0;
+      const fixedFee = gwConfig?.fixed_fee !== undefined ? Number(gwConfig.fixed_fee) : 0;
+      const isGateway = providerLower !== 'wallet' && providerLower !== 'shabakati_wallet';
+      const rawGwFee = isGateway ? ((gross * (feePercent / 100)) + fixedFee) : 0;
+      const gwFee = Number(rawGwFee.toFixed(2));
       const masterRef = resolveOperationNumber(p);
 
       // Extract Status Code, Error Symbol & Gateway response
@@ -210,8 +217,8 @@ export const AdminOperationsReport: React.FC = () => {
         gross_amount: gross,
         platform_commission: comm,
         gateway_fee: gwFee,
-        vendor_net: gross - comm,
-        platform_net: comm - gwFee,
+        vendor_net: Number((gross - comm).toFixed(2)),
+        platform_net: Number((comm - gwFee).toFixed(2)),
         status_code: String(statusCode),
         error_symbol: String(errSymbol),
         gateway_response: gwResponse,
@@ -477,7 +484,7 @@ export const AdminOperationsReport: React.FC = () => {
       header: 'عمولة البوابة',
       accessor: (row) => (
         <span className="font-mono text-xs text-rose-400 dir-ltr block">
-          {row.gateway_fee > 0 ? `-${row.gateway_fee.toLocaleString()} YER` : '0 YER'}
+          {row.gateway_fee > 0 ? `-${row.gateway_fee} YER` : '0 YER'}
         </span>
       ),
     },
@@ -485,7 +492,7 @@ export const AdminOperationsReport: React.FC = () => {
       header: 'صافي التاجر',
       accessor: (row) => (
         <span className="font-mono font-bold text-xs text-emerald-400 dir-ltr block">
-          {row.vendor_net.toLocaleString()} YER
+          {row.vendor_net} YER
         </span>
       ),
     },
@@ -493,7 +500,7 @@ export const AdminOperationsReport: React.FC = () => {
       header: 'صافي المنصة',
       accessor: (row) => (
         <span className="font-mono font-bold text-xs text-cyan-400 dir-ltr block">
-          +{row.platform_net.toLocaleString()} YER
+          {row.platform_net >= 0 ? `+${row.platform_net} YER` : `${row.platform_net} YER`}
         </span>
       ),
     },
@@ -802,7 +809,7 @@ export const AdminOperationsReport: React.FC = () => {
                 </div>
                 <div className="p-2 rounded bg-slate-900 border border-slate-800">
                   <div className="text-[10px] text-slate-400">رسوم البوابة</div>
-                  <div className="font-mono font-bold text-rose-400 dir-ltr">-{selectedOp.gateway_fee.toLocaleString()} YER</div>
+                  <div className="font-mono font-bold text-rose-400 dir-ltr">-{selectedOp.gateway_fee} YER</div>
                 </div>
                 <div className="p-2 rounded bg-slate-900 border border-slate-800">
                   <div className="text-[10px] text-slate-400">صافي التاجر</div>
