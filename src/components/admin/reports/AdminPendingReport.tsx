@@ -15,6 +15,7 @@ import { isCardReserved } from '../../../lib/cardStatusUtils';
 export interface PendingOperationItem {
   id: string;
   payment_id: string;
+  ubtr_reference: string;
   platform_ref: string;
   gateway_ref: string;
   created_at: string;
@@ -148,9 +149,15 @@ export const AdminPendingReport: React.FC = () => {
         gwResponse = 'العملية قيد المتابعة ولم يصدر مزود البوابة رمز خطأ نهائي بعد';
       }
 
+      const canonicalUbtr = p.ubtr_reference || 
+        pItem?.ubtr_reference ||
+        matchedCard?.ubtr_reference ||
+        masterRef;
+
       items.push({
         id: p.id,
         payment_id: p.id,
+        ubtr_reference: canonicalUbtr,
         platform_ref: masterRef,
         gateway_ref: p.provider_reference || `BAS-PENDING-${String(p.id).substring(0, 8).toUpperCase()}`,
         created_at: p.created_at || new Date().toISOString(),
@@ -200,10 +207,12 @@ export const AdminPendingReport: React.FC = () => {
       const fixedFee = basConfig?.fixed_fee ?? 0;
       const gwFee = Math.round((gross * (feePercent / 100)) + fixedFee);
       const masterRef = resolveOperationNumber(card);
+      const canonicalUbtr = card.ubtr_reference || masterRef;
 
       items.push({
         id: card.id,
         payment_id: card.reserved_for_payment_id || card.id,
+        ubtr_reference: canonicalUbtr,
         platform_ref: masterRef,
         gateway_ref: card.ubtr_reference || `RES-${String(card.id).substring(0, 8).toUpperCase()}`,
         created_at: card.created_at || new Date().toISOString(),
@@ -236,6 +245,7 @@ export const AdminPendingReport: React.FC = () => {
     return pendingData.filter(item => {
       if (!searchTerm) return true;
       return (
+        (item.ubtr_reference && item.ubtr_reference.toLowerCase().includes(searchTerm.toLowerCase())) ||
         item.platform_ref.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.gateway_ref.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.customer_name.includes(searchTerm) ||
@@ -343,6 +353,14 @@ export const AdminPendingReport: React.FC = () => {
   };
 
   const columns: Column<PendingOperationItem>[] = [
+    {
+      header: 'UBTR',
+      accessor: (row) => (
+        <span className="font-mono text-xs font-black text-emerald-400 bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-800/80 shadow-sm dir-ltr inline-block">
+          {row.ubtr_reference || '—'}
+        </span>
+      ),
+    },
     {
       header: 'رقم مرجع العملية الموحد',
       accessor: (row) => (
@@ -523,6 +541,7 @@ export const AdminPendingReport: React.FC = () => {
 
   const handleExportCsv = () => {
     const exportRows = filteredPending.map(item => ({
+      'UBTR': item.ubtr_reference,
       'رقم مرجع العملية الموحد': item.platform_ref,
       'معرف الدفع الداخلي': item.payment_id,
       'مرجع بوابة الدفع': item.gateway_ref,
@@ -600,7 +619,7 @@ export const AdminPendingReport: React.FC = () => {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="بحث بالمرجع الموحد، مرجع البوابة، العميل، الحساب، التاجر، كود الكرت المشفر..."
+            placeholder="بحث برقم UBTR، المرجع الموحد، مرجع البوابة، العميل، الحساب، التاجر، كود الكرت المشفر..."
             className="w-full pr-9 pl-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-500 text-xs"
           />
         </div>
@@ -644,8 +663,12 @@ export const AdminPendingReport: React.FC = () => {
 
             {/* Financial & Party Details */}
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 flex items-center justify-between">
+                <span className="text-emerald-400 font-bold block">رقم مرجع العملية الموحد (UBTR):</span>
+                <span className="font-mono text-emerald-300 font-black text-sm dir-ltr block bg-emerald-950 px-2 py-0.5 rounded border border-emerald-700/80">{selectedOp.ubtr_reference}</span>
+              </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">رقم مرجع العملية الموحد:</span>
+                <span className="text-slate-400">رقم المرجع المالي:</span>
                 <span className="font-mono font-bold text-blue-400 dir-ltr">{selectedOp.platform_ref}</span>
               </div>
               <div className="flex justify-between border-t border-slate-900 pt-1.5">
