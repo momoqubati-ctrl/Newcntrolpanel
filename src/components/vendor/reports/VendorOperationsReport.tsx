@@ -7,12 +7,13 @@ import {
   TrendingUp, DollarSign, Ticket, ShieldCheck, CheckCircle2 
 } from 'lucide-react';
 import { exportToCsv, exportToPrint } from '../../../lib/exportUtils';
-import { resolveCardFinancialDetails, resolveOperationNumber, resolveUnifiedCardTransaction } from '../../../lib/ledgerUtils';
-import { decryptCardCode } from '../../../lib/encryptionUtils';
+import { resolveCardFinancialDetails, resolveOperationNumber, resolveUnifiedCardTransaction, formatMasterTransactionId } from '../../../lib/ledgerUtils';
+import { decryptCardCode, formatCardCodeForExport } from '../../../lib/encryptionUtils';
 import { isCardSold } from '../../../lib/cardStatusUtils';
 import { calculateCommissionBreakdown } from '../../../lib/commissionUtils';
 
 export interface VendorCardOperationItem {
+  ubtr: string;
   id: string;
   operation_number: string;
   is_financial_ref_available: boolean;
@@ -34,7 +35,7 @@ export interface VendorCardOperationItem {
 }
 
 export const VendorOperationsReport: React.FC = () => {
-  const { currentUser, currentVendor, cards = [], networks = [], categories = [], profiles = [], payments = [], paymentItems = [], wallets = [], getAuthenticatedSupabase } = useAuth();
+  const { currentUser, currentVendor, cards = [], networks = [], categories = [], profiles = [], payments = [], paymentItems = [], deliveryAttempts = [], wallets = [], getAuthenticatedSupabase } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -58,7 +59,7 @@ export const VendorOperationsReport: React.FC = () => {
       if (!supabase) return;
       const { data, error } = await supabase
         .from('transactions')
-        .select('id, wallet_id, amount, type, status, description, reference_id, created_at, payment_method, transaction_reference')
+        .select('id, wallet_id, amount, type, status, description, reference_id, ubtr_reference, created_at, payment_method, transaction_reference')
         .eq('wallet_id', vendorWallet.id)
         .order('created_at', { ascending: true })
         .limit(5000);
@@ -101,6 +102,7 @@ export const VendorOperationsReport: React.FC = () => {
       const finDetails = resolveCardFinancialDetails(card, {
         payments,
         paymentItems,
+        deliveryAttempts,
         transactions: walletTransactions,
       });
 
@@ -114,7 +116,17 @@ export const VendorOperationsReport: React.FC = () => {
       const effectiveRate = finDetails.commission_rate !== null ? finDetails.commission_rate : vendorCommissionRate;
       const breakdown = calculateCommissionBreakdown(finDetails.gross_amount, effectiveRate);
 
+      const matchedDelivery = deliveryAttempts.find((d: any) => d && d.card_id === card.id);
+      const canonicalUbtr = 
+        finDetails.ubtr_reference ||
+        card.ubtr_reference ||
+        card.ubtr_id ||
+        matchedDelivery?.ubtr_id ||
+        (finDetails.is_financial_reference_available ? finDetails.financial_reference : null) ||
+        formatMasterTransactionId(card.id);
+
       return {
+        ubtr: canonicalUbtr,
         id: card.id,
         operation_number: opNum,
         is_financial_ref_available: finDetails.is_financial_reference_available,
@@ -124,7 +136,7 @@ export const VendorOperationsReport: React.FC = () => {
         network_name: net?.name || card.network_name || 'شبكة الواي فاي',
         category_name: cat?.name || card.category_name || 'باقة إنترنت',
         serial_number: finDetails.card_serial,
-        card_code: decryptCardCode(card.encrypted_code || card.code) || card.code || '••••••••',
+        card_code: formatCardCodeForExport(card.encrypted_code || card.code) || card.code || '••••••••',
         payment_method: finDetails.payment_method,
         is_fallback: finDetails.is_fallback,
         gross_amount: finDetails.gross_amount,
@@ -132,15 +144,16 @@ export const VendorOperationsReport: React.FC = () => {
         platform_commission: breakdown.commissionAmount,
         net_amount: breakdown.vendorNetAmount,
         status: finDetails.status,
-        ubtr_reference: finDetails.ubtr_reference,
+        ubtr_reference: canonicalUbtr,
       };
     }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [cards, networks, categories, profiles, currentVendor?.commission_rate, vendorNetworkIds, payments, paymentItems, walletTransactions]);
+  }, [cards, networks, categories, profiles, currentVendor?.commission_rate, vendorNetworkIds, payments, paymentItems, deliveryAttempts, walletTransactions]);
 
   // Multi-criteria Filtering
   const filteredOperations = useMemo(() => {
     return operationsData.filter(item => {
       const matchesSearch = !searchTerm || 
+        item.ubtr.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.operation_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.customer_name.includes(searchTerm) ||
         item.customer_phone.includes(searchTerm) ||
@@ -166,6 +179,25 @@ export const VendorOperationsReport: React.FC = () => {
   const totalNet = filteredOperations.reduce((sum, item) => sum + item.net_amount, 0);
 
   const columns: Column<VendorCardOperationItem>[] = [
+    {
+      header: 'UBTR',
+      accessor: (row) => (
+        <div className="space-y-0.5">
+          <span className="font-mono text-xs font-extrabold text-cyan-400 block dir-ltr">
+            {row.ubtr}
+          </span>
+          {row.ubtr.startsWith('UBTR-') ? (
+            <span className="inline-block text-[9px] text-cyan-300 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800/60 font-semibold font-mono">
+              مرجع موحد معتمد
+            </span>
+          ) : (
+            <span className="inline-block text-[9px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700/60 font-mono">
+              مرجع المعاملة
+            </span>
+          )}
+        </div>
+      ),
+    },
     {
       header: 'المرجع المالي للعملية',
       accessor: (row) => (
@@ -280,6 +312,34 @@ export const VendorOperationsReport: React.FC = () => {
     },
   ];
 
+  const handleExportCsv = () => {
+    if (filteredOperations.length === 0) return;
+    const csvExportRows = filteredOperations.map(op => ({
+      'UBTR': op.ubtr,
+      'المرجع المالي للعملية': op.operation_number,
+      'التاريخ والوقت': new Date(op.created_at).toLocaleString('ar-YE', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      'اسم العميل': op.customer_name,
+      'رقم حساب العميل': op.customer_phone,
+      'اسم الشبكة': op.network_name,
+      'فئة الكرت': op.category_name,
+      'رمز الكرت (PIN)': op.card_code,
+      'الرقم التسلسلي (S/N)': op.serial_number,
+      'طريقة الدفع': op.payment_method,
+      'المبلغ الإجمالي (YER)': op.gross_amount,
+      'نسبة العمولة': op.commission_rate != null ? `${op.commission_rate}%` : '—',
+      'عمولة المنصة (YER)': op.platform_commission,
+      'صافي المبلغ (YER)': op.net_amount,
+      'حالة العملية': op.status === 'completed' ? 'ناجحة' : (op.status === 'pending' ? 'معلقة' : 'فاشلة'),
+    }));
+    exportToCsv('تقرير_عمليات_بيع_الكروت_UBTR', csvExportRows);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -298,7 +358,7 @@ export const VendorOperationsReport: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => exportToCsv('Vendor_Card_Operations_Report', filteredOperations)}
+            onClick={handleExportCsv}
             className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-md"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
@@ -350,7 +410,7 @@ export const VendorOperationsReport: React.FC = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="بحث بـ رقم المرجع، العميل، الهاتف، السيريال..."
+              placeholder="بحث برقم UBTR، المرجع المالي، اسم العميل، الهاتف، أو السيريال..."
               className="w-full pr-9 pl-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-500"
             />
           </div>
