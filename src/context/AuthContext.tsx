@@ -5,8 +5,8 @@ import {
   DepositRequest, WithdrawalRequest, ExternalWalletConfig, SmsLog, VendorLine, BroadcastNotification, Wallet, WithdrawalMethod 
 } from '../types';
 // Mock data removed: rely on Supabase / runtime context instead of initial mock data
-import { getSupabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase';
-import { encryptCardCode } from '../lib/encryptionUtils';
+import { encryptCardCode, decryptCardCode, formatCardCodeForExport } from '../lib/encryptionUtils';
+import { normalizeCardStatus } from '../lib/cardStatusUtils';
 
 interface AuthContextType {
   currentUser: Profile | null;
@@ -38,6 +38,7 @@ interface AuthContextType {
   profiles: Profile[];
   payments: any[];
   paymentItems: any[];
+  deliveryAttempts: any[];
 
   // Mutations
   approveDeposit: (id: string, notes?: string) => void;
@@ -102,6 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [paymentItems, setPaymentItems] = useState<any[]>([]);
+  const [deliveryAttempts, setDeliveryAttempts] = useState<any[]>([]);
   const [accessToken, setAccessToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return window.localStorage.getItem('shabakati_access_token');
@@ -304,8 +306,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             network_id: cd.network_id,
             category_name: cat?.name,
             network_name: net?.name,
-            code: cd.encrypted_code || cd.code || cd.card_code || '••••••••',
-            status: cd.status || 'available',
+            code: formatCardCodeForExport(cd.encrypted_code || cd.code || cd.card_code || '') || cd.code || cd.card_code || '••••••••',
+            status: (normalizeCardStatus(cd.status) !== 'unknown' ? normalizeCardStatus(cd.status) : (cd.status || 'available')) as any,
             price: cd.price || cat?.price,
             created_at: cd.created_at,
             sold_at: cd.sold_at,
@@ -315,6 +317,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             reserved_for_payment_id: cd.reserved_for_payment_id,
             payment_item_id: cd.payment_item_id,
             encrypted_code: cd.encrypted_code,
+            batch_id: cd.batch_id,
+            sold_to: cd.sold_to || deliveryAttempt?.customer_id,
+            owner_id: cd.owner_id || cd.sold_to || deliveryAttempt?.customer_id,
+            serial_number: cd.serial_number || `SN-${cd.id.substring(0, 8).toUpperCase()}`,
           };
         });
         setCards(mappedCards);
@@ -534,6 +540,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSmsLogs(smsData as any);
       setPayments(paymentsData as any[]);
       setPaymentItems(paymentItemsData as any[]);
+      setDeliveryAttempts(deliveryAttemptsData as any[]);
 
       setBroadcasts([]);
     } catch (err) {
@@ -1092,9 +1099,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Resolve owner ID (vendor ID or user ID in Supabase)
       const resolvedOwnerId = currentVendor?.id || currentVendor?.user_id || currentUser?.id || 'eb04494b-4e06-4ff2-9490-755853a2da9a';
 
+      const supabase = getAuthenticatedSupabase();
+
+      // Create batch record in card_batches if supported
+      let createdBatchId: string | undefined = undefined;
+      try {
+        const batchRef = `BATCH-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        const { data: batchData } = await supabase.from('card_batches').insert({
+          network_id: networkId,
+          package_id: categoryId,
+          batch_reference: batchRef,
+          total_quantity: encryptedItems.length,
+          imported_quantity: encryptedItems.length,
+          status: 'COMPLETED'
+        }).select().single();
+        if (batchData?.id) {
+          createdBatchId = batchData.id;
+        }
+      } catch (bErr) {
+        console.warn('Could not insert card_batches record, proceeding without batch_id:', bErr);
+      }
+
       // Prepare Supabase DB Payload with real database columns
       // Note: Table 'cards' columns in PostgreSQL are:
-      // id, category_id, package_id, network_id, encrypted_code, status, owner_id, created_at
+      // id, category_id, package_id, network_id, encrypted_code, status, owner_id, created_at, batch_id
       const dbPayload = encryptedItems.map(item => ({
         category_id: categoryId,
         package_id: categoryId,
@@ -1102,9 +1130,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         owner_id: resolvedOwnerId,
         encrypted_code: item.encryptedCode,
         status: 'available',
+        ...(createdBatchId ? { batch_id: createdBatchId } : {}),
       }));
 
-      const supabase = getAuthenticatedSupabase();
       const { data, error } = await supabase.from('cards').insert(dbPayload).select();
 
       if (error) {
@@ -1137,6 +1165,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         price: targetCategory?.price,
         created_at: cd.created_at || now.toISOString(),
         owner_id: cd.owner_id,
+        batch_id: cd.batch_id || createdBatchId,
       }));
 
       // Update state with REAL inserted cards
@@ -1342,6 +1371,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       cards,
       payments,
       paymentItems,
+      deliveryAttempts,
       depositRequests,
       withdrawalRequests,
       wallets,

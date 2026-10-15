@@ -28,6 +28,10 @@ for (let i = 0; i < 256; i++) {
 }
 
 const DEFAULT_SECRET_KEY = 'ShabakatiClientKey2026';
+const KNOWN_SECRET_KEYS = [
+  'ShabakatiClientKey2026',
+  'shabakati_enterprise',
+];
 
 function base64UrlToBytes(base64Url: string): Uint8Array {
   let b64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
@@ -42,19 +46,12 @@ function base64UrlToBytes(base64Url: string): Uint8Array {
   return bytes;
 }
 
-/**
- * Decrypts a card code that was encrypted by mobile / server EncryptionUtils
- */
-export function decryptCardCode(ciphertext: string, secretKey: string = DEFAULT_SECRET_KEY): string {
-  if (!ciphertext || typeof ciphertext !== 'string') return '';
-  const trimmed = ciphertext.trim();
-  if (trimmed.length < 16) return trimmed;
-
+function tryDecryptSingleKey(trimmed: string, secretKey: string): string | null {
   try {
     const encryptedBytes = base64UrlToBytes(trimmed);
     const blockSize = 16;
     if (encryptedBytes.length < blockSize || encryptedBytes.length % blockSize !== 0) {
-      return trimmed;
+      return null;
     }
 
     const iv = encryptedBytes.subarray(0, blockSize);
@@ -84,16 +81,53 @@ export function decryptCardCode(ciphertext: string, secretKey: string = DEFAULT_
 
     const paddingLength = decryptedBytes[decryptedBytes.length - 1];
     if (paddingLength <= 0 || paddingLength > blockSize) {
-      return trimmed;
+      return null;
     }
 
     const originalBytes = new Uint8Array(decryptedBytes.slice(0, decryptedBytes.length - paddingLength));
     const decoder = new TextDecoder('utf-8');
     const result = decoder.decode(originalBytes);
-    return result || trimmed;
-  } catch (err) {
-    return trimmed;
+    return result || null;
+  } catch {
+    return null;
   }
+}
+
+/**
+ * Decrypts a card code that was encrypted by mobile / server EncryptionUtils.
+ * Tries the primary key, followed by known enterprise/legacy keys.
+ */
+export function decryptCardCode(ciphertext: string, secretKey: string = DEFAULT_SECRET_KEY): string {
+  if (!ciphertext || typeof ciphertext !== 'string') return '';
+  const trimmed = ciphertext.trim();
+  if (trimmed.length < 16) return trimmed;
+
+  // 1. Try provided secret key
+  const primaryResult = tryDecryptSingleKey(trimmed, secretKey);
+  if (primaryResult && primaryResult.length > 0) {
+    return primaryResult;
+  }
+
+  // 2. Try known alternative keys (e.g. shabakati_enterprise for legacy cards)
+  for (const altKey of KNOWN_SECRET_KEYS) {
+    if (altKey === secretKey) continue;
+    const altResult = tryDecryptSingleKey(trimmed, altKey);
+    if (altResult && altResult.length > 0) {
+      return altResult;
+    }
+  }
+
+  return trimmed;
+}
+
+/**
+ * Formats a decrypted code for clean CSV export or single-line UI display.
+ * Replaces newlines/carriage returns in multi-line cards with ' / '.
+ */
+export function formatCardCodeForExport(rawOrCiphertext: string): string {
+  const decrypted = decryptCardCode(rawOrCiphertext);
+  if (!decrypted) return '';
+  return decrypted.replace(/[\r\n]+/g, ' / ').trim();
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
