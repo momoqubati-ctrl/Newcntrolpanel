@@ -75,6 +75,7 @@ export interface BankStatementParams {
   netMovement: number;
   closingBalance: number;
   entries: {
+    ubtr?: string;
     date: string;
     ref_no: string;
     description: string;
@@ -100,6 +101,7 @@ export function exportToBankStatementPdf(params: BankStatementParams): void {
 
   const rowsHtml = params.entries.map((item, idx) => `
     <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+      <td style="padding: 8px 10px; border: 1px solid #cbd5e1; font-family: monospace; font-weight: bold; color: #0284c7; font-size: 11px;">${item.ubtr || item.ref_no}</td>
       <td style="padding: 8px 10px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 11px;">${item.date}</td>
       <td style="padding: 8px 10px; border: 1px solid #cbd5e1; font-family: monospace; font-weight: bold; color: #1e293b; font-size: 11px;">${item.ref_no}</td>
       <td style="padding: 8px 10px; border: 1px solid #cbd5e1; font-size: 12px; font-weight: 600;">${item.description}</td>
@@ -181,12 +183,13 @@ export function exportToBankStatementPdf(params: BankStatementParams): void {
         <table class="main-table">
           <thead>
             <tr>
-              <th style="width: 15%;">التاريخ والوقت</th>
-              <th style="width: 15%;">رقم المرجع</th>
-              <th style="width: 32%;">البيان والتفاصيل</th>
-              <th style="width: 12%; text-align: left;">مدين (-)</th>
-              <th style="width: 12%; text-align: left;">دائن (+)</th>
-              <th style="width: 14%; text-align: left;">الرصيد التراكمي</th>
+              <th style="width: 14%;">UBTR</th>
+              <th style="width: 13%;">التاريخ والوقت</th>
+              <th style="width: 13%;">رقم المرجع</th>
+              <th style="width: 26%;">البيان والتفاصيل</th>
+              <th style="width: 11%; text-align: left;">مدين (-)</th>
+              <th style="width: 11%; text-align: left;">دائن (+)</th>
+              <th style="width: 12%; text-align: left;">الرصيد التراكمي</th>
               <th style="width: 10%; text-align: center;">الحالة</th>
             </tr>
           </thead>

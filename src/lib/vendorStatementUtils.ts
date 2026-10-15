@@ -14,6 +14,7 @@ export interface RawTransactionInput {
   status?: string;
   description?: string | null;
   reference_id?: string | null;
+  ubtr_reference?: string | null;
   created_at?: string;
   payment_method?: string | null;
   external_wallet_name?: string | null;
@@ -29,10 +30,12 @@ export interface RawWithdrawalRequestInput {
   account_name?: string;
   account_number?: string;
   reject_reason?: string;
+  ubtr_reference?: string | null;
 }
 
 export interface StatementItem {
   id: string;
+  ubtr: string;
   date: string;
   ref_no: string;
   description: string;
@@ -106,6 +109,12 @@ export function buildStatementItems(
       processedWithdrawalIds.add(String(tx.reference_id).toLowerCase());
     }
 
+    // Format UBTR canonical identifier
+    const canonicalUbtr = tx.ubtr_reference ||
+      (tx.transaction_reference?.startsWith('UBTR-') ? tx.transaction_reference : '') ||
+      (tx.reference_id?.startsWith('UBTR-') ? tx.reference_id : '') ||
+      (tx.reference_id ? formatMasterTransactionId(tx.reference_id) : formatMasterTransactionId(tx.id));
+
     // Format reference number
     let refNo = tx.transaction_reference || '';
     if (!refNo && tx.reference_id) {
@@ -133,6 +142,7 @@ export function buildStatementItems(
 
     items.push({
       id: tx.id,
+      ubtr: canonicalUbtr,
       date: tx.created_at || new Date().toISOString(),
       ref_no: refNo,
       description,
@@ -161,8 +171,11 @@ export function buildStatementItems(
       ? `طلب سحب مرفوض: ${wr.bank_name || 'محفظة بنكية'} (${wr.reject_reason || 'غير محدد'})`
       : `طلب سحب قيد المراجعة: ${wr.bank_name || 'محفظة بنكية'} (${wr.account_number || ''})`;
 
+    const wrUbtr = wr.ubtr_reference || formatMasterTransactionId(wr.id);
+
     items.push({
       id: `wr-${wr.id}`,
+      ubtr: wrUbtr,
       date: wr.created_at || new Date().toISOString(),
       ref_no: formatMasterTransactionId(wr.id),
       description: desc.trim(),
@@ -243,9 +256,10 @@ export function filterStatementRows(
     }
 
     if (term) {
+      const matchesUbtr = item.ubtr?.toLowerCase().includes(term);
       const matchesRef = item.ref_no.toLowerCase().includes(term);
       const matchesDesc = item.description.toLowerCase().includes(term);
-      if (!matchesRef && !matchesDesc) {
+      if (!matchesUbtr && !matchesRef && !matchesDesc) {
         return false;
       }
     }

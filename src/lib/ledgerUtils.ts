@@ -263,7 +263,9 @@ export function resolveCardFinancialDetails(
       rate = Math.round((comm / gross) * 10000) / 100;
     }
 
-    const finRef = formatMasterTransactionId(matchedPi.payment_id || payment?.id);
+    // Priority 1: Canonical UBTR sequence assigned to the payment/item
+    const canonicalUbtr = payment?.ubtr_reference || matchedPi.ubtr_reference;
+    const finRef = canonicalUbtr ? formatMasterTransactionId(canonicalUbtr) : formatMasterTransactionId(matchedPi.payment_id || payment?.id);
 
     const isCompleted = 
       payment?.status === 'completed' || 
@@ -289,7 +291,7 @@ export function resolveCardFinancialDetails(
       is_fallback: false,
       source_entity: 'payment_item',
       provider_reference: payment?.provider_reference || null,
-      ubtr_reference: payment?.provider_reference || null,
+      ubtr_reference: canonicalUbtr || payment?.provider_reference || null,
     };
   }
 

@@ -6,6 +6,7 @@ import {
   Users, Store, Wallet, ArrowDownCircle, ArrowUpCircle, 
   Clock, ShieldCheck, CheckCircle2, AlertCircle, FileText 
 } from 'lucide-react';
+import { isCardSold } from '../../lib/cardStatusUtils';
 
 interface AdminDashboardProps {
   onNavigateTab: (tabId: string) => void;
@@ -19,7 +20,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
   const pendingVendorsCount = vendors.filter(v => v.status === 'pending').length;
 
   const totalUsersCount = profiles?.length || 12;
-  const soldCardsTotal = cards.filter(c => c.status === 'sold').reduce((sum, c) => sum + (c.price || 0), 0);
+  const soldCardsTotal = cards.filter(c => isCardSold(c)).reduce((sum, c) => sum + (c.price || 0), 0);
   
   // Real platform commission matching Flutter (185.0 YER)
   const realPlatformCommission = 185;

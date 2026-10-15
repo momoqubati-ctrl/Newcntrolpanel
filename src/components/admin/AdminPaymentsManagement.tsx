@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { exportToCsv, exportToPrint } from '../../lib/exportUtils';
 import { resolveOperationNumber } from '../../lib/ledgerUtils';
+import { isCardSold } from '../../lib/cardStatusUtils';
 
 export interface EnterpriseTransaction {
   id: string;
@@ -138,7 +139,7 @@ export const AdminPaymentsManagement: React.FC = () => {
     });
 
     // 3. Sold Cards Purchases
-    (cards || []).filter(c => c && c.status === 'sold').forEach((c, idx) => {
+    (cards || []).filter(c => c && isCardSold(c)).forEach((c, idx) => {
       const net = c.network_id ? networks.find(n => n.id === c.network_id) : null;
       const catName = c.category_name || 'فئة كرت واي فاي';
       const gross = c.price || 1000;

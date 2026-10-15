@@ -12,6 +12,7 @@ import { resolveOperationNumber } from '../../../lib/ledgerUtils';
 
 export interface VendorMovementItem {
   id: string;
+  ubtr_reference: string;
   operation_number: string;
   created_at: string;
   type: 'withdrawal' | 'deposit' | 'adjustment';
@@ -52,11 +53,13 @@ export const VendorMovementsReport: React.FC = () => {
 
     return relevantWithdrawals.map((w: any) => {
       const opNum = resolveOperationNumber(w);
+      const canonicalUbtr = w.ubtr_reference || opNum;
       const isApproved = w.status === 'approved' || w.status === 'completed';
       const isPending = w.status === 'pending';
 
       return {
         id: w.id,
+        ubtr_reference: canonicalUbtr,
         operation_number: opNum,
         created_at: w.created_at || new Date().toISOString(),
         type: 'withdrawal' as const,
@@ -76,6 +79,7 @@ export const VendorMovementsReport: React.FC = () => {
   const filteredMovements = useMemo(() => {
     return movementsData.filter(item => {
       const matchesSearch = !searchTerm || 
+        (item.ubtr_reference && item.ubtr_reference.toLowerCase().includes(searchTerm.toLowerCase())) ||
         item.operation_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.channel_info.includes(searchTerm) ||
         item.account_number.includes(searchTerm);
@@ -99,6 +103,25 @@ export const VendorMovementsReport: React.FC = () => {
     .reduce((sum, m) => sum + m.amount, 0);
 
   const columns: Column<VendorMovementItem>[] = [
+    {
+      header: 'UBTR',
+      accessor: (row) => (
+        <div className="space-y-0.5">
+          <span className="font-mono text-xs font-black text-cyan-400 block dir-ltr">
+            {row.ubtr_reference || '—'}
+          </span>
+          {row.ubtr_reference?.startsWith('UBTR-') ? (
+            <span className="inline-block text-[9px] text-cyan-300 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800/60 font-semibold font-mono">
+              مرجع موحد معتمد
+            </span>
+          ) : (
+            <span className="inline-block text-[9px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700/60 font-mono">
+              مرجع المعاملة
+            </span>
+          )}
+        </div>
+      ),
+    },
     {
       header: 'رقم المرجع الموحد',
       accessor: (row) => (
@@ -194,7 +217,21 @@ export const VendorMovementsReport: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => exportToCsv('Vendor_Movements_Report', filteredMovements)}
+            onClick={() => {
+              const exportRows = filteredMovements.map(item => ({
+                'UBTR': item.ubtr_reference,
+                'رقم المرجع الموحد': item.operation_number,
+                'التاريخ والوقت': item.created_at,
+                'نوع الحركة': item.type_label,
+                'الحساب والمحفظة': item.channel_info,
+                'رقم الحساب': item.account_number,
+                'المبلغ الإجمالي': item.amount,
+                'الرصيد بعد الحركة': item.balance_after,
+                'الحالة': item.status,
+                'ملاحظات الإدارة': item.admin_notes || '',
+              }));
+              exportToCsv('Vendor_Movements_Report', exportRows);
+            }}
             className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-md"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
@@ -240,7 +277,7 @@ export const VendorMovementsReport: React.FC = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="بحث برقم المرجع أو البنك أو الحساب..."
+              placeholder="بحث برقم UBTR أو المرجع الموحد أو البنك أو الحساب..."
               className="w-full pr-9 pl-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
             />
           </div>
@@ -298,8 +335,12 @@ export const VendorMovementsReport: React.FC = () => {
         >
           <div className="space-y-4 text-xs dir-rtl">
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/60 flex items-center justify-between mb-2">
+                <span className="text-emerald-400 font-bold block">رقم مرجع العملية الموحد (UBTR):</span>
+                <span className="font-mono text-emerald-300 font-black text-sm dir-ltr block bg-emerald-950 px-2.5 py-0.5 rounded border border-emerald-700/80">{selectedMovement.ubtr_reference}</span>
+              </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">رقم المرجع الموحد:</span>
+                <span className="text-slate-400">رقم المرجع المالي:</span>
                 <span className="font-mono font-bold text-blue-400 dir-ltr">{selectedMovement.operation_number}</span>
               </div>
               <div className="flex justify-between border-t border-slate-900 pt-1.5">

@@ -5,6 +5,7 @@ import {
   DepositRequest, WithdrawalRequest, ExternalWalletConfig, SmsLog, VendorLine, BroadcastNotification, Wallet, WithdrawalMethod 
 } from '../types';
 // Mock data removed: rely on Supabase / runtime context instead of initial mock data
+import { getSupabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase';
 import { encryptCardCode, decryptCardCode, formatCardCodeForExport } from '../lib/encryptionUtils';
 import { normalizeCardStatus } from '../lib/cardStatusUtils';
 
@@ -343,6 +344,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             status: d.status || 'pending',
             admin_notes: d.admin_statement || d.admin_notes,
             created_at: d.created_at || new Date().toISOString(),
+            ubtr_reference: d.ubtr_reference,
           };
         });
         setDepositRequests(mappedDeposits);
@@ -365,6 +367,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             admin_notes: w.admin_statement || w.admin_notes,
             receipt_url: w.receipt_image_url || w.receipt_url,
             created_at: w.created_at || new Date().toISOString(),
+            ubtr_reference: w.ubtr_reference,
           };
         });
         setWithdrawalRequests(mappedWithdrawals);
@@ -617,7 +620,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setCurrentUser(adminProf);
         window.localStorage.setItem('shabakati_current_user', JSON.stringify(adminProf));
-        await refetchFromDb(token);
+        try {
+          await refetchFromDb(token);
+        } catch (fetchErr) {
+          console.warn('Initial data fetch warning after admin login:', fetchErr);
+        }
         return true;
       }
 
@@ -669,7 +676,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setCurrentUser(vendorProf);
         window.localStorage.setItem('shabakati_current_user', JSON.stringify(vendorProf));
-        await refetchFromDb(token);
+        try {
+          await refetchFromDb(token);
+        } catch (fetchErr) {
+          console.warn('Initial data fetch warning after vendor login:', fetchErr);
+        }
         return true;
       }
 
@@ -691,7 +702,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
-    void getSupabase().auth.signOut().catch(() => undefined);
+    try {
+      void getSupabase().auth.signOut().catch(() => undefined);
+    } catch {
+      // ignore
+    }
     setCurrentUser(null);
     setAccessToken(null);
     window.localStorage.removeItem('shabakati_current_user');

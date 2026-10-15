@@ -12,6 +12,7 @@ import { resolveOperationNumber } from '../../../lib/ledgerUtils';
 
 export interface AdminMovementItem {
   id: string;
+  ubtr_reference: string;
   operation_number: string;
   type: 'deposit' | 'withdrawal';
   type_label: string;
@@ -49,9 +50,11 @@ export const AdminMovementsReport: React.FC = () => {
       const gross = Number(d.amount || 0);
       const fee = 0; // Deposit fee is typically 0
       const opNum = resolveOperationNumber(d);
+      const canonicalUbtr = d.ubtr_reference || d.reference_number || opNum;
 
       items.push({
         id: d.id,
+        ubtr_reference: canonicalUbtr,
         operation_number: opNum,
         type: 'deposit',
         type_label: 'إيداع رصيد محفظة',
@@ -77,9 +80,11 @@ export const AdminMovementsReport: React.FC = () => {
       const gross = Number(w.amount || 0);
       const fee = 0; // Settlement fee
       const opNum = resolveOperationNumber(w);
+      const canonicalUbtr = w.ubtr_reference || opNum;
 
       items.push({
         id: w.id,
+        ubtr_reference: canonicalUbtr,
         operation_number: opNum,
         type: 'withdrawal',
         type_label: 'سحب أرباح تاجر',
@@ -105,6 +110,7 @@ export const AdminMovementsReport: React.FC = () => {
   const filteredItems = useMemo(() => {
     return movementsData.filter(item => {
       const matchesSearch = !searchTerm ||
+        (item.ubtr_reference && item.ubtr_reference.toLowerCase().includes(searchTerm.toLowerCase())) ||
         item.operation_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.party_name.includes(searchTerm) ||
         item.party_phone.includes(searchTerm) ||
@@ -133,6 +139,14 @@ export const AdminMovementsReport: React.FC = () => {
   const pendingCount = filteredItems.filter(i => i.status === 'pending').length;
 
   const columns: Column<AdminMovementItem>[] = [
+    {
+      header: 'UBTR',
+      accessor: (row) => (
+        <span className="font-mono text-xs font-black text-emerald-400 bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-800/80 shadow-sm dir-ltr inline-block">
+          {row.ubtr_reference || '—'}
+        </span>
+      ),
+    },
     {
       header: 'رقم المرجع الموحد',
       accessor: (row) => (
@@ -248,7 +262,24 @@ export const AdminMovementsReport: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => exportToCsv('Admin_Deposits_Withdrawals_Report', filteredItems)}
+            onClick={() => {
+              const exportRows = filteredItems.map(item => ({
+                'UBTR': item.ubtr_reference,
+                'رقم المرجع الموحد': item.operation_number,
+                'نوع الحركة': item.type_label,
+                'الطرف المعني': item.party_name,
+                'رقم الهاتف': item.party_phone,
+                'الصفة': item.party_role,
+                'القناة': item.channel,
+                'الحساب والملاحظات': item.account_info,
+                'المبلغ الإجمالي': item.gross_amount,
+                'صافي المبلغ': item.net_amount,
+                'التاريخ والوقت': item.created_at,
+                'الحالة': item.status,
+                'ملاحظات الإدارة': item.admin_notes || '',
+              }));
+              exportToCsv('Admin_Deposits_Withdrawals_Report', exportRows);
+            }}
             className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-md"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
@@ -358,8 +389,12 @@ export const AdminMovementsReport: React.FC = () => {
         >
           <div className="space-y-4 text-xs dir-rtl">
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/60 flex items-center justify-between mb-2">
+                <span className="text-emerald-400 font-bold block">رقم مرجع العملية الموحد (UBTR):</span>
+                <span className="font-mono text-emerald-300 font-black text-sm dir-ltr block bg-emerald-950 px-2.5 py-0.5 rounded border border-emerald-700/80">{selectedItem.ubtr_reference}</span>
+              </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">رقم المرجع الموحد:</span>
+                <span className="text-slate-400">رقم المرجع المالي:</span>
                 <span className="font-mono font-bold text-blue-400 dir-ltr">{selectedItem.operation_number}</span>
               </div>
               <div className="flex justify-between border-t border-slate-900 pt-1.5">

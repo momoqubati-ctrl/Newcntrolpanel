@@ -164,6 +164,21 @@ export interface CardItem {
   reserved_for_payment_id?: string;
   payment_item_id?: string;
   encrypted_code?: string;
+  batch_id?: string;
+  serial_number?: string;
+}
+
+export interface CardBatch {
+  id: string;
+  network_id: string;
+  package_id?: string;
+  batch_reference?: string;
+  total_quantity: number;
+  imported_quantity?: number;
+  status?: string;
+  created_by?: string;
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface Transaction {
@@ -174,6 +189,7 @@ export interface Transaction {
   type: 'deposit' | 'withdrawal' | 'card_purchase' | 'vendor_earning' | 'commission' | 'transfer_in' | 'transfer_out';
   status: 'pending' | 'completed' | 'failed' | 'cancelled';
   reference_id?: string;
+  ubtr_reference?: string;
   description?: string;
   created_at: string;
 }
@@ -187,6 +203,7 @@ export interface DepositRequest {
   method_name?: string;
   amount: number;
   reference_number: string;
+  ubtr_reference?: string;
   receipt_image_url?: string;
   status: 'pending' | 'approved' | 'rejected';
   admin_notes?: string;
@@ -203,6 +220,7 @@ export interface WithdrawalRequest {
   account_number: string;
   account_name: string;
   method_id?: string;
+  ubtr_reference?: string;
   status: 'pending' | 'approved' | 'rejected';
   admin_notes?: string;
   receipt_url?: string;

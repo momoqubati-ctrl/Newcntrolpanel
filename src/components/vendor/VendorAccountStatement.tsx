@@ -52,7 +52,7 @@ export const VendorAccountStatement: React.FC = () => {
 
       const { data, error: txError } = await supabase
         .from('transactions')
-        .select('id, wallet_id, amount, type, status, description, reference_id, created_at, payment_method, external_wallet_name, transaction_reference')
+        .select('id, wallet_id, amount, type, status, description, reference_id, ubtr_reference, created_at, payment_method, external_wallet_name, transaction_reference')
         .eq('wallet_id', vendorWallet.id)
         .order('created_at', { ascending: true })
         .limit(5000);
@@ -110,6 +110,7 @@ export const VendorAccountStatement: React.FC = () => {
       netMovement,
       closingBalance,
       entries: displayLedger.map(item => ({
+        ubtr: item.ubtr,
         date: new Date(item.date).toLocaleDateString('ar-YE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
         ref_no: item.ref_no,
         description: item.description,
@@ -124,6 +125,7 @@ export const VendorAccountStatement: React.FC = () => {
 
   const handleExportCsv = () => {
     exportToCsv('Bank_Statement', displayLedger.map(item => ({
+      'UBTR': item.ubtr,
       'رقم المرجع': item.ref_no,
       'التاريخ والوقت': new Date(item.date).toLocaleString('ar-YE'),
       'البيان والتفاصيل': item.description,
@@ -228,7 +230,7 @@ export const VendorAccountStatement: React.FC = () => {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="بحث برقم المرجع، البيان، أو تفاصيل القيد..."
+            placeholder="بحث برقم UBTR، المرجع، البيان، أو تفاصيل القيد..."
             className="w-full pr-9 pl-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-400 focus:outline-none focus:border-blue-500"
           />
         </div>
@@ -291,6 +293,7 @@ export const VendorAccountStatement: React.FC = () => {
           <table className="w-full text-right text-sm text-slate-300 dir-rtl">
             <thead className="bg-slate-950 text-xs font-bold text-slate-400 border-b border-slate-800 uppercase">
               <tr>
+                <th className="p-3.5">UBTR</th>
                 <th className="p-3.5">التاريخ والوقت</th>
                 <th className="p-3.5">رقم المرجع</th>
                 <th className="p-3.5">البيان والتفاصيل المحاسبية</th>
@@ -303,7 +306,7 @@ export const VendorAccountStatement: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60 bg-slate-900/40">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-slate-400 text-xs">
+                  <td colSpan={8} className="p-12 text-center text-slate-400 text-xs">
                     <div className="flex items-center justify-center gap-2">
                       <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
                       <span>جاري تحميل كشف الحساب من السجل المالي...</span>
@@ -313,10 +316,26 @@ export const VendorAccountStatement: React.FC = () => {
               ) : displayLedger.length > 0 ? (
                 displayLedger.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-800/50 transition-colors">
+                    <td className="p-3.5">
+                      <div className="space-y-0.5">
+                        <span className="font-mono text-xs font-black text-cyan-400 block dir-ltr">
+                          {row.ubtr}
+                        </span>
+                        {row.ubtr.startsWith('UBTR-') ? (
+                          <span className="inline-block text-[9px] text-cyan-300 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800/60 font-semibold font-mono">
+                            مرجع موحد معتمد
+                          </span>
+                        ) : (
+                          <span className="inline-block text-[9px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700/60 font-mono">
+                            مرجع المعاملة
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="p-3.5 text-xs text-slate-400 font-mono">
                       {new Date(row.date).toLocaleDateString('ar-YE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
-                    <td className="p-3.5 font-mono text-xs font-bold text-cyan-300 dir-ltr">{row.ref_no}</td>
+                    <td className="p-3.5 font-mono text-xs font-bold text-slate-300 dir-ltr">{row.ref_no}</td>
                     <td className="p-3.5 text-xs font-semibold text-slate-100">{row.description}</td>
                     <td className="p-3.5 font-mono font-bold text-rose-400 text-left text-sm dir-ltr">
                       {row.debit > 0 ? `-${row.debit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
@@ -334,7 +353,7 @@ export const VendorAccountStatement: React.FC = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-500 text-xs">
+                  <td colSpan={8} className="p-8 text-center text-slate-500 text-xs">
                     لا توجد قيود محاسبية مسجلة في السجل المالي مطابقة للبحث
                   </td>
                 </tr>

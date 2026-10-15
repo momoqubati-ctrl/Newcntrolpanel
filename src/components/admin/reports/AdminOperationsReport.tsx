@@ -8,12 +8,14 @@ import {
   Layers, CheckCircle2, AlertTriangle, XCircle, Info, Hash, RefreshCw, Lock
 } from 'lucide-react';
 import { exportToCsv, exportToPrint } from '../../../lib/exportUtils';
-import { resolveOperationNumber, resolveUnifiedCardTransaction } from '../../../lib/ledgerUtils';
+import { resolveOperationNumber, resolveUnifiedCardTransaction, resolveCardFinancialDetails, formatMasterTransactionId } from '../../../lib/ledgerUtils';
 import { decryptCardCode } from '../../../lib/encryptionUtils';
+import { isCardSold, isCardReserved } from '../../../lib/cardStatusUtils';
 
 export interface AdminCardOperationItem {
   id: string;
   payment_id: string;
+  ubtr_reference: string;
   platform_ref: string;
   gateway_ref: string;
   created_at: string;
@@ -45,6 +47,7 @@ export const AdminOperationsReport: React.FC = () => {
     cards = [], 
     payments = [], 
     paymentItems = [],
+    deliveryAttempts = [],
     networks = [], 
     vendors = [], 
     categories = [], 
@@ -63,6 +66,7 @@ export const AdminOperationsReport: React.FC = () => {
   // Build Comprehensive Admin Card Purchases & Sales Report (All Operations)
   const operationsData: AdminCardOperationItem[] = useMemo(() => {
     const items: AdminCardOperationItem[] = [];
+    const matchedCardIds = new Set<string>();
 
     // 1. Process ALL payment records (completed, pending, reconciliation_required, failed, refunded)
     payments.filter(p => p != null).forEach((p: any) => {
@@ -90,12 +94,16 @@ export const AdminOperationsReport: React.FC = () => {
         if (p.metadata?.card_id && c.id === p.metadata.card_id) return true;
         if (Array.isArray(p.metadata?.card_ids) && p.metadata.card_ids.includes(c.id)) return true;
         if (allMatchingPaymentItems.some((pi: any) => pi.card_id === c.id || (Array.isArray(pi.card_ids) && pi.card_ids.includes(c.id)))) return true;
-        if (p.user_id && (c.owner_id === p.user_id || c.sold_to === p.user_id) && c.status === 'sold' && c.sold_at && p.created_at) {
+        if (p.user_id && (c.owner_id === p.user_id || c.sold_to === p.user_id) && isCardSold(c) && c.sold_at && p.created_at) {
           const diffMs = Math.abs(new Date(c.sold_at).getTime() - new Date(p.created_at).getTime());
-          if (diffMs < 300000 && (!p.category_id || c.category_id === p.category_id)) return true;
+          if (diffMs < 300000 && (!p.category_id || c.category_id === p.category_id || (c as any).package_id === p.category_id)) return true;
         }
         return false;
       });
+
+      if (matchedCard?.id) {
+        matchedCardIds.add(matchedCard.id);
+      }
 
       const rawEncrypted = matchedCard?.encrypted_code || 
         matchedCard?.code || 
@@ -175,9 +183,16 @@ export const AdminOperationsReport: React.FC = () => {
       const gwRef = p.provider_reference || 
         (p.provider === 'basgate' ? `BAS-${String(p.id).substring(0, 8).toUpperCase()}` : `PAY-${String(p.id).substring(0, 8).toUpperCase()}`);
 
+      const canonicalUbtr = p.ubtr_reference || 
+        allMatchingPaymentItems.find((pi: any) => pi?.ubtr_reference)?.ubtr_reference ||
+        deliveryAttempts.find((d: any) => d.payment_id === p.id)?.ubtr_id ||
+        matchedCard?.ubtr_reference ||
+        masterRef;
+
       items.push({
         id: p.id,
         payment_id: p.id,
+        ubtr_reference: canonicalUbtr,
         platform_ref: masterRef,
         gateway_ref: gwRef,
         created_at: p.created_at || new Date().toISOString(),
@@ -205,21 +220,23 @@ export const AdminOperationsReport: React.FC = () => {
       });
     });
 
-    // 2. Include cards with status 'sold' or 'reserved' that are not represented in payments
-    cards.filter(c => c && (c.status === 'sold' || c.status === 'reserved')).forEach((card: any) => {
+    // 2. Include cards with status 'sold' or 'reserved' that are not represented in payments (App Wallet purchases & direct operations)
+    cards.filter(c => c && (isCardSold(c) || isCardReserved(c))).forEach((card: any) => {
       // Robust deduplication: prevent any card associated with an existing payment from duplicating
-      const isAlreadyRepresented = items.some(i => 
-        i.payment_id === card.reserved_for_payment_id || 
-        i.id === card.reserved_for_payment_id || 
-        (card.payment_item_id && paymentItems.some((pi: any) => pi.id === card.payment_item_id && pi.payment_id === i.payment_id)) ||
-        i.id === card.id
-      );
+      const isAlreadyRepresented = 
+        matchedCardIds.has(card.id) ||
+        items.some(i => 
+          i.payment_id === card.reserved_for_payment_id || 
+          i.id === card.reserved_for_payment_id || 
+          (card.payment_item_id && paymentItems.some((pi: any) => pi.id === card.payment_item_id && pi.payment_id === i.payment_id)) ||
+          i.id === card.id
+        );
       if (isAlreadyRepresented) {
         return;
       }
-      const net = networks.find(n => n.id === card.network_id);
+      const cat = categories.find(c => c.id === card.category_id || (card as any).package_id === c.id);
+      const net = cat ? networks.find(n => n.id === cat.network_id) : (card.network_id ? networks.find(n => n.id === card.network_id) : null);
       const vendor = net ? vendors.find(v => v.id === net.vendor_id) : null;
-      const cat = categories.find(c => c.id === card.category_id);
       const cust = profiles.find(p => p.id === card.owner_id || p.id === card.sold_to);
 
       const vWallet = wallets.find(w => w.user_id === vendor?.id);
@@ -232,7 +249,7 @@ export const AdminOperationsReport: React.FC = () => {
       const rawEncrypted = card.encrypted_code || card.code || `B7arJ6tp-${String(card.id).substring(0, 8)}`;
       const decrypted = decryptCardCode(rawEncrypted) || card.code || rawEncrypted;
 
-      const isCompleted = card.status === 'sold';
+      const isCompleted = isCardSold(card);
       const isEncrypted = !isCompleted;
       const cardCode = isCompleted ? decrypted : rawEncrypted;
 
@@ -240,17 +257,44 @@ export const AdminOperationsReport: React.FC = () => {
       const commRate = vendor?.commission_rate ?? 5.0;
       const comm = Math.round(gross * (commRate / 100));
 
-      const resolved = resolveUnifiedCardTransaction(card, { payments, paymentItems });
-      const masterRef = resolved.ubtr;
-      const gwRef = card.ubtr_reference || `INV-${masterRef}`;
+      // Align strictly with VendorOperationsReport logic
+      const finDetails = resolveCardFinancialDetails(card, {
+        payments,
+        paymentItems,
+        deliveryAttempts,
+      });
+
+      const resolved = resolveUnifiedCardTransaction(card, { payments, paymentItems, deliveryAttempts });
+
+      // Primary Reference: exactly the operation_number shown in Vendor Operations Report
+      // which is finDetails.financial_reference (e.g. TX-XXXXXXXX from order/tx, or UBTR)
+      const masterRef = finDetails.is_financial_reference_available && finDetails.financial_reference
+        ? finDetails.financial_reference
+        : (resolved.ubtr && resolved.ubtr !== 'TX-00000000' && !resolved.is_fallback
+          ? resolved.ubtr
+          : (card.order_id ? formatMasterTransactionId(card.order_id) : (card.ubtr_reference ? formatMasterTransactionId(card.ubtr_reference) : formatMasterTransactionId(card.id))));
+
+      const paymentMethod = (finDetails.payment_method && finDetails.payment_method !== 'غير محدد')
+        ? finDetails.payment_method
+        : ((resolved.payment_method && resolved.payment_method !== 'غير محدد') ? resolved.payment_method : 'محفظة التطبيق');
+
+      // Gateway/Authoritative reference (UBTR-1000...)
+      const resolvedGwRef = finDetails.ubtr_reference || resolved.gateway_reference || card.ubtr_reference;
+      const gwRef = resolvedGwRef || `WLT-${masterRef.replace(/^UBTR-/, '').replace(/^TX-/, '')}`;
+
+      const canonicalUbtr = finDetails.ubtr_reference ||
+        resolvedGwRef ||
+        card.ubtr_reference ||
+        masterRef;
 
       items.push({
         id: card.id,
-        payment_id: card.id,
+        payment_id: resolved.payment_id || card.id,
+        ubtr_reference: canonicalUbtr,
         platform_ref: masterRef,
         gateway_ref: gwRef,
         created_at: card.sold_at || card.created_at || new Date().toISOString(),
-        payment_method: resolved.payment_method,
+        payment_method: paymentMethod,
         customer_name: cust?.name || 'مشترك شبكتي',
         customer_account: cust?.phone || (cust as any)?.phone_number || '780780525',
         network_name: net?.name || 'شبكة الواي فاي',
@@ -266,21 +310,22 @@ export const AdminOperationsReport: React.FC = () => {
         gateway_fee: 0,
         vendor_net: gross - comm,
         platform_net: comm,
-        status_code: card.status === 'sold' ? '1202' : '1001',
-        error_symbol: card.status === 'sold' ? 'SUCCESS' : 'PENDING_IN_PROGRESS',
-        gateway_response: card.status === 'sold' ? 'تم تسليم الكرت بنجاح للمشترك' : 'الكرت محجوز للعملية',
-        status: card.status === 'sold' ? 'completed' : 'pending',
-        raw_payload: {},
+        status_code: isCompleted ? '1202' : '1001',
+        error_symbol: isCompleted ? 'SUCCESS' : 'PENDING_IN_PROGRESS',
+        gateway_response: isCompleted ? 'تم تسليم الكرت بنجاح للمشترك (محفظة التطبيق)' : 'الكرت محجوز للعملية',
+        status: isCompleted ? 'completed' : 'pending',
+        raw_payload: card,
       });
     });
 
     return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [cards, payments, paymentItems, networks, vendors, categories, profiles, wallets, walletsConfig]);
+  }, [cards, payments, paymentItems, deliveryAttempts, networks, vendors, categories, profiles, wallets, walletsConfig]);
 
   // Filtering
   const filteredData = useMemo(() => {
     return operationsData.filter(item => {
       const matchesSearch = !searchTerm ||
+        (item.ubtr_reference && item.ubtr_reference.toLowerCase().includes(searchTerm.toLowerCase())) ||
         item.platform_ref.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.gateway_ref.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.customer_name.includes(searchTerm) ||
@@ -315,6 +360,14 @@ export const AdminOperationsReport: React.FC = () => {
 
   // Columns including Network Owner Account & Card Number (Unencrypted when completed, Encrypted when pending)
   const columns: Column<AdminCardOperationItem>[] = [
+    {
+      header: 'UBTR',
+      accessor: (row) => (
+        <span className="font-mono text-xs font-black text-emerald-400 bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-800/80 shadow-sm dir-ltr inline-block">
+          {row.ubtr_reference || '—'}
+        </span>
+      ),
+    },
     {
       header: 'رقم مرجع العملية الموحد',
       accessor: (row) => (
@@ -492,6 +545,7 @@ export const AdminOperationsReport: React.FC = () => {
 
   const handleExportCsv = () => {
     const exportRows = filteredData.map(item => ({
+      'UBTR': item.ubtr_reference,
       'رقم مرجع العملية الموحد': item.platform_ref,
       'معرف الدفع الداخلي': item.payment_id,
       'مرجع بوابة الدفع': item.gateway_ref,
@@ -671,8 +725,12 @@ export const AdminOperationsReport: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-800 text-[11px]">
+                <div className="sm:col-span-2 p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 flex items-center justify-between">
+                  <span className="text-emerald-400 font-bold block">رقم مرجع العملية الموحد (UBTR):</span>
+                  <span className="font-mono text-emerald-300 font-black text-sm dir-ltr block bg-emerald-950 px-2 py-0.5 rounded border border-emerald-700/80">{selectedOp.ubtr_reference}</span>
+                </div>
                 <div>
-                  <span className="text-slate-400 block">رقم المرجع الموحد (Platform UBTR):</span>
+                  <span className="text-slate-400 block">رقم المرجع المالي:</span>
                   <span className="font-mono text-blue-400 font-bold text-xs dir-ltr block">{selectedOp.platform_ref}</span>
                 </div>
                 <div>

@@ -10,6 +10,7 @@ import {
 import { exportToCsv, exportToPrint } from '../../../lib/exportUtils';
 import { resolveOperationNumber } from '../../../lib/ledgerUtils';
 import { decryptCardCode } from '../../../lib/encryptionUtils';
+import { isCardReserved } from '../../../lib/cardStatusUtils';
 
 export interface PendingOperationItem {
   id: string;
@@ -176,7 +177,7 @@ export const AdminPendingReport: React.FC = () => {
     });
 
     // 2. Reserved cards that haven't been completed yet
-    cards.filter(c => c && c.status === 'reserved' && !items.some(i => i.id === c.reserved_for_payment_id)).forEach((card: any) => {
+    cards.filter(c => c && isCardReserved(c) && !items.some(i => i.id === c.reserved_for_payment_id)).forEach((card: any) => {
       const net = networks.find(n => n.id === card.network_id);
       const vendor = net ? vendors.find(v => v.id === net.vendor_id) : null;
       const cat = categories.find(c => c.id === card.category_id);
